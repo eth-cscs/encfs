@@ -336,6 +336,7 @@ ssize_t CipherFileIO::readOneBlock(const IORequest &req) const {
     tmpReq.offset += HEADER_SIZE;
   }
   ssize_t readSize = base->read(tmpReq);
+  VLOG(1) << "readOneBlock(): tmpReq.offset=" << tmpReq.offset << " tmpReq.dataLen=" << tmpReq.dataLen << " readSize=" << readSize;
 
   bool ok;
   if (readSize > 0) {
@@ -415,6 +416,23 @@ ssize_t CipherFileIO::writeOneBlock(const IORequest &req) {
   return res;
 }
 
+
+int CipherFileIO::lock(const IORequest &req) const {
+  IORequest tmp = req;
+  if (haveHeader) tmp.offset += HEADER_SIZE;
+  if (req.dataLen < blockSize()) tmp.dataLen = blockSize();
+  else tmp.dataLen = req.dataLen;
+  return base->lock(tmp);
+}
+
+int CipherFileIO::unlock(const IORequest &req) const {
+  IORequest tmp = req;
+  if (haveHeader) tmp.offset += HEADER_SIZE;
+  if (req.dataLen < blockSize()) tmp.dataLen = blockSize();
+  else tmp.dataLen = req.dataLen;
+  return base->unlock(tmp);
+}
+
 bool CipherFileIO::blockWrite(unsigned char *buf, int size,
                               uint64_t _iv64) const {
   VLOG(1) << "Called blockWrite";
@@ -462,6 +480,9 @@ bool CipherFileIO::streamRead(unsigned char *buf, int size,
 int CipherFileIO::truncate(off_t size) {
   int res = 0;
   int reopen = 0;
+
+  VLOG(1) << "Truncate to" << size;
+
   // well, we will truncate, so we need a write access to the file
   if (!base->isWritable()) {
     int newFlags = lastFlags | O_RDWR;

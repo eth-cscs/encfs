@@ -74,6 +74,9 @@ class FileIO {
 
   virtual bool isWritable() const = 0;
 
+  virtual int lock(const IORequest &) const { return 0; }
+  virtual int unlock(const IORequest &) const { return 0; }
+
  private:
   // not implemented..
   FileIO(const FileIO &);

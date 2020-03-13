@@ -52,6 +52,10 @@ class RawFileIO : public FileIO {
 
   virtual bool isWritable() const;
 
+  int lock(const IORequest &req) const;
+  int unlock(const IORequest &req) const;
+
+
  protected:
   std::string name;
 

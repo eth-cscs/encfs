@@ -22,10 +22,13 @@
 #define _XOPEN_SOURCE 500  // pick up pread , pwrite
 #endif
 #include "easylogging++.h"
+#include <cassert>
 #include <cerrno>
+#include <chrono>
 #include <cinttypes>
 #include <cstring>
 #include <fcntl.h>
+#include <set>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <utility>
@@ -183,7 +186,8 @@ void RawFileIO::setFileName(const char *fileName) { name = fileName; }
 const char *RawFileIO::getFileName() const { return name.c_str(); }
 
 off_t RawFileIO::getSize() const {
-  if (!knownSize) {
+  //if (!knownSize) {
+  if (true) {
     struct stat stbuf;
     memset(&stbuf, 0, sizeof(struct stat));
     int res = lstat(name.c_str(), &stbuf);
@@ -199,6 +203,52 @@ off_t RawFileIO::getSize() const {
   }
   return fileSize;
 }
+
+namespace {
+    std::set<off_t> lockedRegions;
+}
+
+int RawFileIO::lock(const IORequest &req) const {
+  // lock region
+  VLOG(1) << "Locking region with offset=" << req.offset << " and lenght=" << req.dataLen;
+  //assert(req.dataLen == 1024);
+  struct flock lck;
+  lck.l_type = F_WRLCK;
+  lck.l_whence = SEEK_SET;
+  lck.l_start = req.offset;
+  lck.l_len = req.dataLen;
+  auto start = chrono::steady_clock::now();
+  int fcntlRet = fcntl(fd, F_SETLKW, &lck);
+  auto end = chrono::steady_clock::now();
+  auto usecs = chrono::duration_cast<chrono::microseconds>(end - start).count();
+  VLOG(1) << "Locking: fcntl return value=" << fcntlRet << " elapsed time: " << usecs << "usecs";
+  lockedRegions.insert(req.offset);
+  return fcntlRet;
+}
+
+
+int RawFileIO::unlock(const IORequest &req) const {
+  VLOG(1) << "Unlocking region with offset=" << req.offset << " and lenght=" << req.dataLen;
+//  bool foundLockedRequest = lockedRegions.find(req.offset) != lockedRegions.end();
+//  if (!foundLockedRequest) VLOG(1) << "Did not find a locked region with the given offset=" << req.offset << ". This is an error!!!";
+//  assert(foundLockedRequest);
+//  assert(req.dataLen==1024);
+
+  // unlock region
+  struct flock lck;
+  lck.l_type = F_UNLCK;
+  lck.l_whence = SEEK_SET;
+  lck.l_start = req.offset;
+  lck.l_len = req.dataLen;
+  auto start = chrono::steady_clock::now();
+  int fcntlRet = fcntl(fd, F_SETLKW, &lck);
+  auto end = chrono::steady_clock::now();
+  auto usecs = chrono::duration_cast<chrono::microseconds>(end - start).count();
+  VLOG(1) << "Unlocking: fcntl return value=" << fcntlRet << " elapsed time: " << usecs << "usecs";
+  lockedRegions.erase(req.offset);
+  return fcntlRet;
+}
+
 
 ssize_t RawFileIO::read(const IORequest &req) const {
   rAssert(fd >= 0);
@@ -218,6 +268,8 @@ ssize_t RawFileIO::read(const IORequest &req) const {
 ssize_t RawFileIO::write(const IORequest &req) {
   rAssert(fd >= 0);
   rAssert(canWrite);
+
+  VLOG(1) << "writing into raw file: offset=" << req.offset << " dataLen=" << req.dataLen;
 
   // int retrys = 10;
   void *buf = req.data;
@@ -271,6 +323,8 @@ ssize_t RawFileIO::write(const IORequest &req) {
 
 int RawFileIO::truncate(off_t size) {
   int res;
+
+  VLOG(1) << "Truncating to " << size;
 
   if (fd >= 0 && canWrite) {
     res = ::ftruncate(fd, size);
